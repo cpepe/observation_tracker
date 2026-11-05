@@ -141,6 +141,7 @@ struct ProjectDetailView: View {
         DataTableView(
             analysis: analysis,
             fields: project.visibleFields,
+            onAdd: saveNewObservation,
             onEdit: { id in
                 if let record = record(id) { formRequest = FormRequest(kind: .edit(record)) }
             },
@@ -216,7 +217,7 @@ struct ProjectDetailView: View {
                     if self.banner?.id == banner.id { withAnimation { self.banner = nil } }
                 }
             }
-            if horizontalSizeClass != .regular {
+            if horizontalSizeClass != .regular && resolvedSegment(isWide: false) != .data {
                 Button(action: addObservation) {
                     Label("Add Observation", systemImage: "plus")
                         .font(.headline)
@@ -271,6 +272,15 @@ struct ProjectDetailView: View {
 
     private func addObservation() {
         formRequest = FormRequest(kind: .new(prefill: [:]))
+    }
+
+    private func saveNewObservation(timestamp: Date, values: [UUID: FieldValue]) {
+        let record = ObservationRecord(timestamp: timestamp, values: values)
+        modelContext.insert(record)
+        record.project = project
+        project.updatedAt = .now
+        try? modelContext.save()
+        showBanner("Observation added")
     }
 
     private func deleteObservation(_ id: UUID) {
