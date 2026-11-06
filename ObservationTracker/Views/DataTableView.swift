@@ -12,6 +12,8 @@ struct DataTableView: View {
     let onDelete: (UUID) -> Void
     let onDuplicate: (UUID) -> Void
 
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+
     enum SortKey: Hashable {
         case timestamp
         case field(UUID)
@@ -20,19 +22,18 @@ struct DataTableView: View {
     @State private var sortKey: SortKey = .timestamp
     @State private var ascending = false
 
-    // Top input row state for adding a new observation
+    // State for adding a new observation
     @State private var inputTexts: [UUID: String] = [:]
     @State private var newTimestamp: Date = .now
     @State private var isLive: Bool = true
     @State private var showingDatePickerModal = false
     @FocusState private var focusedField: UUID?
 
-    private let minDateWidth: CGFloat = 150
+    private let minDateWidth: CGFloat = 145
     private let minActionWidth: CGFloat = 44
     private let minFieldWidth: CGFloat = 100
     private let rowHeight: CGFloat = 38
     private let headerHeight: CGFloat = 32
-    private let inputRowHeight: CGFloat = 44
 
     // MARK: - Validation & Input Parsing
 
@@ -153,10 +154,31 @@ struct DataTableView: View {
         }
     }
 
+    // MARK: - Grid Layout for Inline Inputs
+
+    private var inputGridColumns: [GridItem] {
+        if horizontalSizeClass == .regular {
+            let count = min(max(1, fields.count), 4)
+            return Array(repeating: GridItem(.flexible(), spacing: 10), count: count)
+        } else {
+            if fields.count <= 1 {
+                return [GridItem(.flexible())]
+            } else {
+                return [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)]
+            }
+        }
+    }
+
     // MARK: - Body
 
     var body: some View {
         VStack(spacing: 0) {
+            // Inline Entry Card (fits phone width without side-scrolling)
+            inlineEntryCard
+                .padding(.horizontal, 12)
+                .padding(.top, 6)
+                .padding(.bottom, 6)
+
             summaryBar
 
             GeometryReader { proxy in
@@ -175,15 +197,6 @@ struct DataTableView: View {
                         // Sticky Header
                         headerRow(dateWidth: dateWidth, fieldWidth: fieldWidth, actionWidth: actionWidth)
                         Divider()
-
-                        // Sticky Top Input Row
-                        inputRow(dateWidth: dateWidth, fieldWidth: fieldWidth, actionWidth: actionWidth)
-                        Divider()
-
-                        if let err = activeError {
-                            errorBanner(err, width: tableWidth)
-                            Divider()
-                        }
 
                         // Scrollable observation rows
                         ScrollView(.vertical, showsIndicators: true) {
@@ -229,8 +242,155 @@ struct DataTableView: View {
             Spacer()
         }
         .padding(.horizontal)
-        .padding(.vertical, 4)
+        .padding(.bottom, 4)
     }
+
+    // MARK: - Inline Entry Card
+
+    private var inlineEntryCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            // Card Top Bar: Timestamp Button on Left, Add Button on Right
+            HStack(spacing: 8) {
+                // Timestamp Picker Button
+                Button {
+                    showingDatePickerModal = true
+                } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: isLive ? "clock" : "clock.fill")
+                            .font(.caption2)
+                            .foregroundStyle(isLive ? .secondary : Color.accentColor)
+
+                        TimelineView(.everyMinute) { context in
+                            let date = isLive ? context.date : newTimestamp
+                            Text(date.formatted(date: .numeric, time: .shortened))
+                                .font(.subheadline)
+                                .monospacedDigit()
+                                .lineLimit(1)
+                                .foregroundStyle(isLive ? .primary : Color.accentColor)
+                        }
+
+                        Image(systemName: "chevron.down")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 6)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6)
+                            .fill(isLive ? Color(uiColor: .tertiarySystemFill) : Color.accentColor.opacity(0.12))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 6)
+                            .stroke(isLive ? Color.clear : Color.accentColor.opacity(0.4), lineWidth: 1)
+                    )
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Change observation date and time")
+
+                if !isLive {
+                    Button {
+                        isLive = true
+                        newTimestamp = .now
+                    } label: {
+                        Image(systemName: "arrow.counterclockwise")
+                            .font(.caption2.bold())
+                            .foregroundStyle(Color.accentColor)
+                            .frame(width: 24, height: 24)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Reset time to now")
+                }
+
+                Spacer()
+
+                // Prominent Add Button
+                Button(action: commitNewObservation) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "plus")
+                            .font(.subheadline.weight(.bold))
+                        Text("Add")
+                            .font(.subheadline.weight(.semibold))
+                    }
+                    .padding(.horizontal, 4)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.regular)
+                .disabled(!canAdd)
+                .accessibilityLabel("Add observation")
+            }
+
+            // Active Error Banner inside Card
+            if let err = activeError {
+                HStack(spacing: 6) {
+                    Image(systemName: "exclamationmark.circle.fill")
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                    Text(err)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .lineLimit(1)
+                    Spacer()
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(Color.red.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
+            }
+
+            // Grid of Field Inputs
+            LazyVGrid(columns: inputGridColumns, spacing: 8) {
+                ForEach(fields) { field in
+                    fieldInputCell(field)
+                }
+            }
+        }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(Color(uiColor: .secondarySystemGroupedBackground))
+                .shadow(color: Color.black.opacity(0.04), radius: 3, y: 1)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(Color.secondary.opacity(0.15), lineWidth: 1)
+        )
+    }
+
+    private func fieldInputCell(_ field: FieldDefinition) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(field.name)
+                .font(.caption.weight(.medium))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+
+            TextField(
+                field.type == .integer ? "Integer" : (field.type == .decimal ? "Decimal" : "Text"),
+                text: Binding(
+                    get: { inputTexts[field.id] ?? "" },
+                    set: { inputTexts[field.id] = $0 }
+                )
+            )
+            .font(.subheadline)
+            .monospacedDigit(field.type.isNumeric)
+            .multilineTextAlignment(field.type.isNumeric ? .trailing : .leading)
+            .keyboardType(field.type == .integer ? .numberPad : (field.type == .decimal ? .decimalPad : .default))
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(fieldError(field) != nil ? Color.red.opacity(0.12) : Color(uiColor: .tertiarySystemFill))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(fieldError(field) != nil ? Color.red : Color.clear, lineWidth: 1)
+            )
+            .focused($focusedField, equals: field.id)
+            .onSubmit {
+                commitNewObservation()
+            }
+        }
+    }
+
+    // MARK: - Table Header & Rows
 
     private func headerRow(dateWidth: CGFloat, fieldWidth: CGFloat, actionWidth: CGFloat) -> some View {
         HStack(spacing: 0) {
@@ -275,123 +435,6 @@ struct DataTableView: View {
         .buttonStyle(.plain)
         .accessibilityLabel("Sort by \(title)")
         .accessibilityValue(sortKey == key ? (ascending ? "Ascending" : "Descending") : "")
-    }
-
-    private func inputRow(dateWidth: CGFloat, fieldWidth: CGFloat, actionWidth: CGFloat) -> some View {
-        HStack(spacing: 0) {
-            // Date / Time text button (opens modal on tap)
-            HStack(spacing: 4) {
-                Button {
-                    showingDatePickerModal = true
-                } label: {
-                    HStack(spacing: 4) {
-                        TimelineView(.everyMinute) { context in
-                            let date = isLive ? context.date : newTimestamp
-                            Text(date.formatted(date: .numeric, time: .shortened))
-                                .font(.subheadline)
-                                .monospacedDigit()
-                                .lineLimit(1)
-                                .foregroundStyle(isLive ? .primary : Color.accentColor)
-                        }
-
-                        Image(systemName: isLive ? "clock" : "clock.fill")
-                            .font(.caption2)
-                            .foregroundStyle(isLive ? .secondary : Color.accentColor)
-                    }
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 6)
-                    .background(
-                        RoundedRectangle(cornerRadius: 6)
-                            .fill(isLive ? Color(uiColor: .tertiarySystemFill) : Color.accentColor.opacity(0.12))
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 6)
-                            .stroke(isLive ? Color.clear : Color.accentColor.opacity(0.4), lineWidth: 1)
-                    )
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Change observation date and time")
-
-                if !isLive {
-                    Button {
-                        isLive = true
-                        newTimestamp = .now
-                    } label: {
-                        Image(systemName: "arrow.counterclockwise")
-                            .font(.caption2.bold())
-                            .foregroundStyle(Color.accentColor)
-                            .frame(width: 20, height: 20)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Reset time to now")
-                }
-            }
-            .padding(.horizontal, 6)
-            .frame(width: dateWidth, alignment: .leading)
-
-            // Input fields for each column
-            ForEach(fields) { field in
-                TextField(
-                    field.type == .integer ? "Integer" : (field.type == .decimal ? "Decimal" : "Text"),
-                    text: Binding(
-                        get: { inputTexts[field.id] ?? "" },
-                        set: { inputTexts[field.id] = $0 }
-                    )
-                )
-                .font(.subheadline)
-                .monospacedDigit(field.type.isNumeric)
-                .multilineTextAlignment(field.type.isNumeric ? .trailing : .leading)
-                .keyboardType(field.type == .integer ? .numberPad : (field.type == .decimal ? .decimalPad : .default))
-                .padding(.horizontal, 8)
-                .padding(.vertical, 5)
-                .background(
-                    RoundedRectangle(cornerRadius: 6)
-                        .fill(fieldError(field) != nil ? Color.red.opacity(0.12) : Color(uiColor: .tertiarySystemFill))
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 6)
-                        .stroke(fieldError(field) != nil ? Color.red : Color.clear, lineWidth: 1)
-                )
-                .focused($focusedField, equals: field.id)
-                .onSubmit {
-                    commitNewObservation()
-                }
-                .padding(.horizontal, 4)
-                .frame(width: fieldWidth)
-            }
-
-            // Action button (Add)
-            Button(action: commitNewObservation) {
-                Image(systemName: "plus")
-                    .font(.system(size: 13, weight: .bold))
-                    .foregroundStyle(.white)
-                    .frame(width: 28, height: 28)
-                    .background(canAdd ? Color.accentColor : Color.secondary.opacity(0.3))
-                    .clipShape(Circle())
-            }
-            .disabled(!canAdd)
-            .frame(width: actionWidth, alignment: .center)
-            .accessibilityLabel("Add observation")
-        }
-        .frame(height: inputRowHeight)
-        .background(Color(uiColor: .systemBackground))
-    }
-
-    private func errorBanner(_ message: String, width: CGFloat) -> some View {
-        HStack(spacing: 6) {
-            Image(systemName: "exclamationmark.circle.fill")
-                .font(.caption)
-                .foregroundStyle(.red)
-            Text(message)
-                .font(.caption)
-                .foregroundStyle(.red)
-                .lineLimit(1)
-            Spacer()
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 4)
-        .frame(width: width, alignment: .leading)
-        .background(Color.red.opacity(0.08))
     }
 
     private func observationRow(
@@ -456,7 +499,7 @@ struct DataTableView: View {
             Text(analysis.totalCount == 0 ? "No Observations Yet" : "No Observations in This Range")
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(.secondary)
-            Text(analysis.totalCount == 0 ? "Enter values in the row above to add your first observation." : "Adjust the date range above to see observations.")
+            Text(analysis.totalCount == 0 ? "Enter values in the card above and tap Add." : "Adjust the date range above to see observations.")
                 .font(.footnote)
                 .foregroundStyle(.tertiary)
         }
